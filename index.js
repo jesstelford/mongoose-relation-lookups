@@ -83,24 +83,33 @@ function postAggregateMutationFactory({ path }, { model, joinPathName }) {
   // Recreate Mongoose instances of the sub items every time to allow for
   // further operations to be performed on those sub items via Mongoose.
   return item => {
+    if (!item) {
+      return;
+    }
+
     let joinedItems;
 
     if (many) {
       joinedItems = item[path].map((itemId, itemIndex) => {
-        const joinedItem = item[joinPathName][itemIndex];
-        if (joinedItem) {
-          // I'm pretty certain that the two arrays should have the same
-          // order, but not 100%, so am doing a sanity check here so we can
-          // write a less efficient, but more accurate algorithm if needed
-          if (!itemId.equals(joinedItem._id)) {
-            throw new Error(
-              'Expected results from MongoDB aggregation to be ordered, but IDs are different.',
-            );
-          }
-          return rel(item[joinPathName][itemIndex]);
+        const joinedItemIndex = item[joinPathName].findIndex(({ _id }) => _id === itemId);
+
+        if (joinedItemIndex === -1) {
+          return itemId;
         }
-        return itemId;
+
+        // Extract that element out of the array (so the next iteration is a bit
+        // faster)
+        const joinedItem = item[joinPathName].splice(joinedItemIndex, 1);
+        return rel(joinedItem);
       });
+
+      // At this point, we should have spliced out all of the items
+      if (item[joinPathName].length > 0) {
+        // I don't see why this should ever happen, but just in case...
+        throw new Error(
+          'Expected results from MongoDB aggregation to be a subset of the original items.',
+        );
+      }
     } else {
       const joinedItem = item[joinPathName][0];
       if (!joinedItem || !joinedItem._id.equals(item[path])) {
@@ -120,9 +129,10 @@ function postAggregateMutationFactory({ path }, { model, joinPathName }) {
     };
 
     // Get rid of the temporary data key we used to join on
+    // Should be an empty array now that we spliced all the values out above
     delete newItemValues[joinPathName];
 
-    return model(newItemValues);
+    return newItemValues;
   };
 }
 
@@ -195,21 +205,57 @@ function lookup(args) {
     // 
   }
   */
-  const pipeline = buildPipeline(args, { model: this });
+  const pipeline1 = buildPipeline(args[0], { model: this });
+  const pipeline2 = buildPipeline(args[1], { model: this });
 
-  return this.aggregate([...pipeline.pipeline])
+  return this.aggregate([
+    /* OR
+     *
+    {
+      $facet: {
+        firstFacet: pipeline1.pipeline,
+        secondFacet: pipeline2.pipeline,
+      },
+    }, {
+      $project: {
+        'result_of_query': {
+          // TODO: FIXME: Dedupe
+          $setUnion: [ '$firstFacet', '$secondFacet' ],
+        },
+        'firstFacet': 1,
+        'secondFacet': 1
+      }
+    }, {
+      // $unwind + $replaceRoot to return a flattened array
+      $unwind: '$result_of_query',
+    }, {
+      $replaceRoot: {
+        newRoot: '$result_of_query'
+      }
+    },
+    */
+
+    ...pipeline1.pipeline,
+    ...pipeline2.pipeline,
+  ])
     .exec()
     .then(data =>
       data
-        .map((item, index, list) =>
+        .map((item, index, list) => {
           // Iterate over all the mutations
-          pipeline.postAggregateMutation.reduce(
+          const mutated1 = pipeline1.postAggregateMutation.reduce(
             // And pass through the result to the following mutator
             (mutatedItem, mutation) => mutation(mutatedItem, index, list),
             // Starting at the original item
             item,
-          ),
-        )
+          );
+          return pipeline2.postAggregateMutation.reduce(
+            // And pass through the result to the following mutator
+            (mutatedItem, mutation) => mutation(mutatedItem, index, list),
+            // Starting at the original item
+            mutated1,
+          );
+        })
         // If anything gets removed, we clear it out here
         .filter(Boolean),
     )
@@ -266,7 +312,7 @@ const Post = mongoose.model('Post', postSchema);
     );
 
     const statuses = await Status.insertMany(
-      ['Deleted', 'Draft', 'Published', 'Archived'].map(name => ({ name })),
+      ['Deleted', 'Draft', 'Published', 'Archived'].map(status => ({ status })),
     );
 
     const categories = await Category.insertMany(
@@ -276,21 +322,21 @@ const Post = mongoose.model('Post', postSchema);
     await Post.create({
       title: 'Something',
       author: users[1],
-      statuses: statuses[0],
+      status: statuses[0],
       categories: [categories[0]],
     });
 
     await Post.create({
       title: 'An Article',
       author: users[1],
-      statuses: statuses[2],
+      status: statuses[2],
       categories: [categories[0], categories[1]],
     });
 
     await Post.create({
       title: 'And another thing!',
       author: users[1],
-      statuses: statuses[3],
+      status: statuses[3],
       categories: [categories[1], categories[2]],
     });
 
@@ -299,7 +345,7 @@ const Post = mongoose.model('Post', postSchema);
       author: users[2],
       categories: [categories[2], categories[3]],
     });
-
+    /*
     await (async () => {
       const postAuthorNames = [/Jess/i];
       console.log(`Lookup posts with Author ${postAuthorNames}`);
@@ -317,10 +363,10 @@ const Post = mongoose.model('Post', postSchema);
         query: { name: { $in: postCategoryNames } },
       });
     })();
-
+    */
     await (async () => {
       const postAuthorNames = [/Jess/i];
-      const postStatuses = ['published', 'archived'];
+      const postStatuses = ['Published', 'Archived'];
       console.log(
         `Lookup posts with Status ${postStatuses}, and Author ${postAuthorNames}`,
       );
