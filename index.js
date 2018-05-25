@@ -201,8 +201,11 @@ function buildPipeline(args, { model }, pipeline = {}) {
  *     ...
  *   ]
  * }
+ *
+ * @param modifiers {Object} {skip, limit, orderBy}
+ * orderBy must take form '<field>_<ASC|DESC>'
  */
-function lookup(args) {
+function lookup(args, { skip = 0, limit = Infinity, orderBy = '' } = {}) {
   /*
   if (modifiers.some) {
     // $expr: { $in: ["$_id", `$$${path}`] }
@@ -213,7 +216,7 @@ function lookup(args) {
   */
   const pipeline = buildPipeline(args, { model: this });
 
-  return this.aggregate([
+  const aggregationPipeline = [
     /* OR
      *
     {
@@ -240,7 +243,31 @@ function lookup(args) {
     },
     */
     ...pipeline.pipeline,
-  ])
+  ];
+
+  if (orderBy) {
+    const [orderField, orderDirection] = orderBy.split('_');
+
+    aggregationPipeline.push({
+      $sort: {
+        [orderField]: orderDirection === 'ASC' ? 1 : -1,
+      },
+    });
+  }
+
+  if (skip < Infinity && skip > 0) {
+    aggregationPipeline.push({
+      $skip: skip,
+    });
+  }
+
+  if (limit < Infinity && limit > 0) {
+    aggregationPipeline.push({
+      $limit: limit,
+    });
+  }
+
+  return this.aggregate(aggregationPipeline)
     .exec()
     .then(data =>
       data
@@ -353,7 +380,7 @@ const Post = mongoose.model('Post', postSchema);
 
     await (async () => {
       const postAuthorNames = [/Jess/i];
-      console.log(`Lookup posts with Author ${postAuthorNames}`);
+      console.log(`\nLookup posts with Author ${postAuthorNames}`);
       await Post.lookup({
         path: 'author',
         query: { name: { $in: postAuthorNames } },
@@ -362,11 +389,17 @@ const Post = mongoose.model('Post', postSchema);
 
     await (async () => {
       const postCategoryNames = ['React', 'GraphQL'];
-      console.log(`Lookup posts with Categories ${postCategoryNames}`);
-      await Post.lookup({
-        path: 'categories',
-        query: { name: { $in: postCategoryNames } },
-      });
+      const skip = 1;
+      const limit = 2;
+      const orderBy = 'title_ASC';
+      console.log(`\nLookup posts with Categories ${postCategoryNames}, ordered by ${orderBy}, skip ${skip}, limit ${limit}`);
+      await Post.lookup(
+        {
+          path: 'categories',
+          query: { name: { $in: postCategoryNames } },
+        },
+        { skip, limit, orderBy },
+      );
     })();
 
     await (async () => {
@@ -374,7 +407,7 @@ const Post = mongoose.model('Post', postSchema);
       const postCategories = ['node'];
       const postStatuses = ['Published', 'Archived'];
       console.log(
-        `Lookup posts with Status ${postStatuses}, and Author ${postAuthorNames}, and Categories ${postCategories}`,
+        `\nLookup posts with Status ${postStatuses}, and Author ${postAuthorNames}, and Categories ${postCategories}`,
       );
       // Implicit 'AND' query
       await Post.lookup([
