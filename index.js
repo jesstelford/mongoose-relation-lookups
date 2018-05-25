@@ -4,6 +4,8 @@ const {
   Types: { ObjectId }
 } = (mongoose = require("mongoose"));
 
+const passthrough = x => x;
+
 // Non-recursive, should be called on every level
 function makeANDexplicit(args) {
   if (Array.isArray(args)) {
@@ -119,6 +121,28 @@ function postAggregateMutationFactory({ path }, { model, joinPathName }) {
   };
 }
 
+function buildPipeline(args, { model }, pipeline = {}) {
+
+  args = makeANDexplicit(args);
+  invariantANDOR(args);
+
+  // TODO
+  if (args.AND) {
+    throw new Error('AND not implemented');
+    // If there are more than one path/query combo, we can do them with `$facet`
+    // aggregate state
+  } else if (args.OR) {
+    throw new Error('OR not implemented');
+  } else {
+    // An expression
+    const joinPathName = `${args.path}__matched`;
+    pipeline.pipeline = (pipeline.pipeline || []).concat(expressionPipeline(args, { joinPathName, model }));
+    pipeline.postAggregateMutation = (pipeline.postAggregateMutation || []).concat(postAggregateMutationFactory(args, { joinPathName, model }));
+  }
+
+  return pipeline;
+}
+
 /**
  * @param args {Object} Recursive format: <EXPRESSION | AND>
  * Where:
@@ -164,34 +188,24 @@ function lookup(args) {
     // 
   }
   */
-
-  args = makeANDexplicit(args);
-  invariantANDOR(args);
-
-  let pipeline;
-  let postAggregateMutation;
-
-  // TODO
-  if (args.AND) {
-    throw new Error('AND not implemented');
-    // If there are more than one path/query combo, we can do them with `$facet`
-    // aggregate state
-  } else if (args.OR) {
-    throw new Error('OR not implemented');
-  } else {
-    // An expression
-    const joinPathName = `${args.path}__matched`;
-    pipeline = expressionPipeline(args, { joinPathName, model: this });
-    postAggregateMutation = postAggregateMutationFactory(args, { joinPathName, model: this });
-  }
+  const pipeline = buildPipeline(args, { model: this });
 
   return this.aggregate([
-    ...pipeline,
+    ...pipeline.pipeline,
   ])
     .exec()
     .then(data => (
       data
-        .map(postAggregateMutation)
+        .map((item, index, list) => (
+          // Iterate over all the mutations
+          pipeline.postAggregateMutation.reduce(
+            // And pass through the result to the following mutator
+            (mutatedItem, mutation) => mutation(mutatedItem, index, list),
+            // Starting at the original item
+            item,
+          )
+        ))
+        // If anything gets removed, we clear it out here
         .filter(Boolean)
     )).then(data => {
       console.log(util.inspect(data, { depth: null, colors: true }));
