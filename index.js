@@ -35,32 +35,6 @@ function getRelModel(model, path) {
 postSchema.statics.lookupOneToMany = function({ path, query }) {
   let rel = getRelModel(this, path);
 
-  /*
-  let group = { $group: {} };
-  this.schema.eachPath(
-    p =>
-      (group.$group[p] =
-        p === "_id"
-          ? "$_id"
-          : p === path
-            ? { $push: `$${p}` }
-            : { $first: `$${p}` })
-  );
-
-  let pipeline = [
-    {
-      $lookup: {
-        from: rel.collection.name,
-        as: path,
-        localField: path,
-        foreignField: "_id"
-      }
-    },
-    { $unwind: `$${path}` },
-    { $match: query },
-    group
-  ];
-  */
   // MongoDB 3.6 and up $lookup with sub-pipeline
   // FIXME: Not working
   console.log('rel.collection.name', rel.collection.name);
@@ -75,7 +49,7 @@ postSchema.statics.lookupOneToMany = function({ path, query }) {
           {
             $match: {
               ...query,
-              $expr: { $eq: ["$_id", `$$${path}`] }
+              $expr: { $in: ["$_id", `$$${path}`] }
             }
           }
         ]
@@ -128,7 +102,6 @@ postSchema.statics.lookupOneToOne = function({ path, query }) {
   ];
   */
   // MongoDB 3.6 and up $lookup with sub-pipeline
-  // FIXME: Not working
   console.log('rel.collection.name', rel.collection.name);
 
   return this.aggregate([
@@ -219,7 +192,7 @@ const log = body => console.log(JSON.stringify(body, undefined, 2));
     log(result);
 
     // Query with our static
-    const postCategoryNames = ['React'];
+    const postCategoryNames = ['React', 'frontend'];
     result = await Post.lookupOneToMany({
       path: "categories",
       query: { "name": { $in: postCategoryNames } }
