@@ -82,16 +82,50 @@ postSchema.statics.lookup = function({ path, query, modifiers = {} }) {
     { $match: { [joinPathName]: { $exists: true, $ne: [] } } },
   ])
     .exec()
-    .then(data => {
-      console.log(util.inspect(data, { depth: null, colors: true }));
+    .then(data => (
       // Recreate Mongoose instances of the sub items every time to allow for
       // further operations to be performed on those sub items via Mongoose.
-      return data.map(item =>
-        this({
+      data.map(item => {
+        let joinedItems;
+
+        if (many) {
+          joinedItems = item[path].map((itemId, itemIndex) => {
+            const joinedItem = item[joinPathName][itemIndex];
+            if (joinedItem) {
+              // I'm pretty certain that the two arrays should have the same
+              // order, but not 100%, so am doing a sanity check here so we can
+              // write a less efficient, but more accurate algorithm if needed
+              if (!itemId.equals(joinedItem._id)) {
+                throw new Error('Expected results from MongoDB aggregation to be ordered, but IDs are different.');
+              }
+              return rel(item[joinPathName][itemIndex]);
+            }
+            return itemId;
+          });
+        } else {
+          const joinedItem = item[joinPathName][0];
+          if (!joinedItem || !joinedItem._id.equals(item[path])) {
+            // Shouldn't be possible due to the { $exists: true, $ne: [] }
+            // aggregation step above, but in case that fails or doesn't behave
+            // as expected, we can catch that now.
+            throw new Error('Expected MongoDB aggregation to correctly filter to a single related item, but no item found.');
+          }
+          joinedItems = rel(joinedItem);
+        }
+
+        const newItemValues = {
           ...item,
-          [path]: Array.isArray(item[path]) ? item[path].map(data => rel(data)) : rel(item[path]),
-        })
-      );
+          [path]: joinedItems,
+        };
+
+        // Get rid of the temporary data key we used to join on
+        delete newItemValues[joinPathName];
+
+        return this(newItemValues);
+      })
+    )).then(data => {
+      console.log(util.inspect(data, { depth: null, colors: true }));
+      return data;
     });
 };
 
