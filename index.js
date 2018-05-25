@@ -26,14 +26,16 @@ const postSchema = new Schema(
 );
 
 function getRelModel(model, path) {
-  if (model.schema.path(path).$isMongooseArray) {
-    return mongoose.model(model.schema.path(path).caster.options.ref);
-  }
-  return mongoose.model(model.schema.path(path).options.ref);
 }
 
-postSchema.statics.lookupOneToMany = function({ path, query }) {
-  let rel = getRelModel(this, path);
+postSchema.statics.lookup = function({ path, query }) {
+  let rel;
+  const many = this.schema.path(path).$isMongooseArray;
+  if (many) {
+    rel = mongoose.model(this.schema.path(path).caster.options.ref);
+  } else {
+    rel = mongoose.model(this.schema.path(path).options.ref);
+  }
 
   // MongoDB 3.6 and up $lookup with sub-pipeline
   // FIXME: Not working
@@ -49,72 +51,7 @@ postSchema.statics.lookupOneToMany = function({ path, query }) {
           {
             $match: {
               ...query,
-              $expr: { $in: ["$_id", `$$${path}`] }
-            }
-          }
-        ]
-      }
-    },
-    {
-      $unwind: `$${path}`,
-    }
-  ])
-    .exec()
-    .then(data => {
-      console.log(...data);
-      return data.map(item =>
-        this({
-          ...item,
-          [path]: Array.isArray(item[path]) ? item[path].map(data => rel(data)) : rel(item[path]),
-        })
-      );
-    });
-};
-
-
-postSchema.statics.lookupOneToOne = function({ path, query }) {
-  let rel = getRelModel(this, path);
-
-  /*
-  let group = { $group: {} };
-  this.schema.eachPath(
-    p =>
-      (group.$group[p] =
-        p === "_id"
-          ? "$_id"
-          : p === path
-            ? { $push: `$${p}` }
-            : { $first: `$${p}` })
-  );
-
-  let pipeline = [
-    {
-      $lookup: {
-        from: rel.collection.name,
-        as: path,
-        localField: path,
-        foreignField: "_id"
-      }
-    },
-    { $unwind: `$${path}` },
-    { $match: query },
-    group
-  ];
-  */
-  // MongoDB 3.6 and up $lookup with sub-pipeline
-  console.log('rel.collection.name', rel.collection.name);
-
-  return this.aggregate([
-    {
-      $lookup: {
-        from: rel.collection.name,
-        as: path,
-        let: { [path]: `$${path}` },
-        pipeline: [
-          {
-            $match: {
-              ...query,
-              $expr: { $eq: ["$_id", `$$${path}`] }
+              $expr: { [many ? '$in' : '$eq']: ["$_id", `$$${path}`] }
             }
           }
         ]
@@ -184,7 +121,7 @@ const log = body => console.log(JSON.stringify(body, undefined, 2));
 
     // Query with our static
     const postAuthorNames = [/Jess/i];
-    let result = await Post.lookupOneToOne({
+    let result = await Post.lookup({
       path: "author",
       query: { "name": { $in: postAuthorNames } }
     });
@@ -193,7 +130,7 @@ const log = body => console.log(JSON.stringify(body, undefined, 2));
 
     // Query with our static
     const postCategoryNames = ['React', 'frontend'];
-    result = await Post.lookupOneToMany({
+    result = await Post.lookup({
       path: "categories",
       query: { "name": { $in: postCategoryNames } }
     });
