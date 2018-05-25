@@ -91,7 +91,7 @@ function postAggregateMutationFactory({ path }, { model, joinPathName }) {
 
     if (many) {
       joinedItems = item[path].map((itemId, itemIndex) => {
-        const joinedItemIndex = item[joinPathName].findIndex(({ _id }) => _id === itemId);
+        const joinedItemIndex = item[joinPathName].findIndex(({ _id }) => _id.equals(itemId));
 
         if (joinedItemIndex === -1) {
           return itemId;
@@ -99,7 +99,7 @@ function postAggregateMutationFactory({ path }, { model, joinPathName }) {
 
         // Extract that element out of the array (so the next iteration is a bit
         // faster)
-        const joinedItem = item[joinPathName].splice(joinedItemIndex, 1);
+        const joinedItem = item[joinPathName].splice(joinedItemIndex, 1)[0];
         return rel(joinedItem);
       });
 
@@ -107,7 +107,7 @@ function postAggregateMutationFactory({ path }, { model, joinPathName }) {
       if (item[joinPathName].length > 0) {
         // I don't see why this should ever happen, but just in case...
         throw new Error(
-          'Expected results from MongoDB aggregation to be a subset of the original items.',
+          `Expected results from MongoDB aggregation '${joinPathName}' to be a subset of the original items, bet left with:\n${JSON.stringify(item[joinPathName])}`,
         );
       }
     } else {
