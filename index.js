@@ -265,7 +265,7 @@ function lookup(args) {
 const uri = 'mongodb://localhost/looktest';
 
 mongoose.Promise = global.Promise;
-mongoose.set('debug', true);
+//mongoose.set('debug', true);
 
 const userSchema = new Schema({
   name: String,
@@ -350,7 +350,7 @@ const Post = mongoose.model('Post', postSchema);
       status: statuses[1],
       categories: [categories[0], categories[2]],
     });
-    /*
+
     await (async () => {
       const postAuthorNames = [/Jess/i];
       console.log(`Lookup posts with Author ${postAuthorNames}`);
@@ -368,7 +368,7 @@ const Post = mongoose.model('Post', postSchema);
         query: { name: { $in: postCategoryNames } },
       });
     })();
-    */
+
     await (async () => {
       const postAuthorNames = [/Je/i];
       const postCategories = ['node'];
