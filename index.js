@@ -1,8 +1,8 @@
 const util = require('util');
 const {
   Schema,
-  Types: { ObjectId }
-} = (mongoose = require("mongoose"));
+  Types: { ObjectId },
+} = (mongoose = require('mongoose'));
 
 const passthrough = x => x;
 
@@ -29,8 +29,10 @@ function invariantANDOR(args) {
   }
 }
 
-function expressionPipeline({ path, query, modifiers = {} }, { model, joinPathName }) {
-
+function expressionPipeline(
+  { path, query, modifiers = {} },
+  { model, joinPathName },
+) {
   let rel;
   const many = model.schema.path(path).$isMongooseArray;
   if (many) {
@@ -53,11 +55,11 @@ function expressionPipeline({ path, query, modifiers = {} }, { model, joinPathNa
           {
             $match: {
               ...query,
-              $expr: { [many ? '$in' : '$eq']: ["$_id", `$$${path}`] }
-            }
-          }
-        ]
-      }
+              $expr: { [many ? '$in' : '$eq']: ['$_id', `$$${path}`] },
+            },
+          },
+        ],
+      },
     },
     // Filter out empty array results (the $lookup will return a document with
     // an empty array when no matches are found in the related field
@@ -70,7 +72,6 @@ function expressionPipeline({ path, query, modifiers = {} }, { model, joinPathNa
 }
 
 function postAggregateMutationFactory({ path }, { model, joinPathName }) {
-
   let rel;
   const many = model.schema.path(path).$isMongooseArray;
   if (many) {
@@ -92,7 +93,9 @@ function postAggregateMutationFactory({ path }, { model, joinPathName }) {
           // order, but not 100%, so am doing a sanity check here so we can
           // write a less efficient, but more accurate algorithm if needed
           if (!itemId.equals(joinedItem._id)) {
-            throw new Error('Expected results from MongoDB aggregation to be ordered, but IDs are different.');
+            throw new Error(
+              'Expected results from MongoDB aggregation to be ordered, but IDs are different.',
+            );
           }
           return rel(item[joinPathName][itemIndex]);
         }
@@ -104,7 +107,9 @@ function postAggregateMutationFactory({ path }, { model, joinPathName }) {
         // Shouldn't be possible due to the { $exists: true, $ne: [] }
         // aggregation step above, but in case that fails or doesn't behave
         // as expected, we can catch that now.
-        throw new Error('Expected MongoDB aggregation to correctly filter to a single related item, but no item found.');
+        throw new Error(
+          'Expected MongoDB aggregation to correctly filter to a single related item, but no item found.',
+        );
       }
       joinedItems = rel(joinedItem);
     }
@@ -122,7 +127,6 @@ function postAggregateMutationFactory({ path }, { model, joinPathName }) {
 }
 
 function buildPipeline(args, { model }, pipeline = {}) {
-
   args = makeANDexplicit(args);
   invariantANDOR(args);
 
@@ -136,8 +140,12 @@ function buildPipeline(args, { model }, pipeline = {}) {
   } else {
     // An expression
     const joinPathName = `${args.path}__matched`;
-    pipeline.pipeline = (pipeline.pipeline || []).concat(expressionPipeline(args, { joinPathName, model }));
-    pipeline.postAggregateMutation = (pipeline.postAggregateMutation || []).concat(postAggregateMutationFactory(args, { joinPathName, model }));
+    pipeline.pipeline = (pipeline.pipeline || []).concat(
+      expressionPipeline(args, { joinPathName, model }),
+    );
+    pipeline.postAggregateMutation = (
+      pipeline.postAggregateMutation || []
+    ).concat(postAggregateMutationFactory(args, { joinPathName, model }));
   }
 
   return pipeline;
@@ -149,7 +157,7 @@ function buildPipeline(args, { model }, pipeline = {}) {
  *
  * <EXPRESSION>:
  * <AND | OR | { path, query }>
- * 
+ *
  * <OR>:
  * {
  *   OR: [
@@ -158,17 +166,17 @@ function buildPipeline(args, { model }, pipeline = {}) {
  *     ...
  *   ]
  * }
- * 
+ *
  * <AND>:
  * <IMPLICIT_AND | EXPLICIT_AND>
- * 
+ *
  * <IMPLICIT_AND>:
  * [
  *   <AND | OR | EXPRESSION>,
  *   <AND | OR | EXPRESSION>,
  *   ...
  * ]
- * 
+ *
  * <EXPLICIT_AND>:
  * {
  *   AND: [
@@ -177,9 +185,8 @@ function buildPipeline(args, { model }, pipeline = {}) {
  *     ...
  *   ]
  * }
-*/
+ */
 function lookup(args) {
-
   /*
   if (modifiers.some) {
     // $expr: { $in: ["$_id", `$$${path}`] }
@@ -190,69 +197,61 @@ function lookup(args) {
   */
   const pipeline = buildPipeline(args, { model: this });
 
-  return this.aggregate([
-    ...pipeline.pipeline,
-  ])
+  return this.aggregate([...pipeline.pipeline])
     .exec()
-    .then(data => (
+    .then(data =>
       data
-        .map((item, index, list) => (
+        .map((item, index, list) =>
           // Iterate over all the mutations
           pipeline.postAggregateMutation.reduce(
             // And pass through the result to the following mutator
             (mutatedItem, mutation) => mutation(mutatedItem, index, list),
             // Starting at the original item
             item,
-          )
-        ))
+          ),
+        )
         // If anything gets removed, we clear it out here
-        .filter(Boolean)
-    )).then(data => {
+        .filter(Boolean),
+    )
+    .then(data => {
       console.log(util.inspect(data, { depth: null, colors: true }));
       return data;
     });
-};
+}
 
-
-
-
-
-const uri = "mongodb://localhost/looktest";
+const uri = 'mongodb://localhost/looktest';
 
 mongoose.Promise = global.Promise;
-mongoose.set("debug", true);
+mongoose.set('debug', true);
 
 const userSchema = new Schema({
-  name: String
+  name: String,
 });
 
 const statusSchema = new Schema({
-  status: String
+  status: String,
 });
 
 const categorySchema = new Schema({
-  name: String
+  name: String,
 });
 
 const postSchema = new Schema(
   {
     title: String,
-    author: { type: Schema.Types.ObjectId, ref: "User" },
-    status: { type: Schema.Types.ObjectId, ref: "Status" },
-    categories: [{ type: Schema.Types.ObjectId, ref: "Category" }],
+    author: { type: Schema.Types.ObjectId, ref: 'User' },
+    status: { type: Schema.Types.ObjectId, ref: 'Status' },
+    categories: [{ type: Schema.Types.ObjectId, ref: 'Category' }],
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 postSchema.statics.lookup = lookup;
 
-const User = mongoose.model("User", userSchema);
-const Status = mongoose.model("Status", statusSchema);
-const Category = mongoose.model("Category", categorySchema);
-const Post = mongoose.model("Post", postSchema);
-
-
-
+const User = mongoose.model('User', userSchema);
+const Status = mongoose.model('Status', statusSchema);
+const Category = mongoose.model('Category', categorySchema);
+const Post = mongoose.model('Post', postSchema);
 
 (async function() {
   try {
@@ -263,15 +262,15 @@ const Post = mongoose.model("Post", postSchema);
 
     // Create items
     const users = await User.insertMany(
-      ['Jed Watson', 'Jess Telford', 'Boris Bozic'].map(name => ({ name }))
+      ['Jed Watson', 'Jess Telford', 'Boris Bozic'].map(name => ({ name })),
     );
 
     const statuses = await Status.insertMany(
-      ['Deleted', 'Draft', 'Published', 'Archived'].map(name => ({ name }))
+      ['Deleted', 'Draft', 'Published', 'Archived'].map(name => ({ name })),
     );
 
     const categories = await Category.insertMany(
-      ['React', 'GraphQL', 'node', 'frontend'].map(name => ({ name }))
+      ['React', 'GraphQL', 'node', 'frontend'].map(name => ({ name })),
     );
 
     await Post.create({
@@ -306,7 +305,7 @@ const Post = mongoose.model("Post", postSchema);
       console.log(`Lookup posts with Author ${postAuthorNames}`);
       await Post.lookup({
         path: 'author',
-        query: { 'name': { $in: postAuthorNames } }
+        query: { name: { $in: postAuthorNames } },
       });
     })();
 
@@ -315,24 +314,26 @@ const Post = mongoose.model("Post", postSchema);
       console.log(`Lookup posts with Categories ${postCategoryNames}`);
       await Post.lookup({
         path: 'categories',
-        query: { 'name': { $in: postCategoryNames } }
+        query: { name: { $in: postCategoryNames } },
       });
     })();
 
     await (async () => {
       const postAuthorNames = [/Jess/i];
       const postStatuses = ['published', 'archived'];
-      console.log(`Lookup posts with Status ${postStatuses}, and Author ${postAuthorNames}`);
+      console.log(
+        `Lookup posts with Status ${postStatuses}, and Author ${postAuthorNames}`,
+      );
       // Implicit 'AND' query
       await Post.lookup([
         {
           path: 'status',
-          query: { 'status': { $in: postStatuses } }
+          query: { status: { $in: postStatuses } },
         },
         {
           path: 'author',
-          query: { 'name': { $in: postAuthorNames } }
-        }
+          query: { name: { $in: postAuthorNames } },
+        },
       ]);
     })();
 
