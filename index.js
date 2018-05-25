@@ -140,22 +140,28 @@ function buildPipeline(args, { model }, pipeline = {}) {
   args = makeANDexplicit(args);
   invariantANDOR(args);
 
-  // TODO
-  if (args.AND) {
-    throw new Error('AND not implemented');
-    // If there are more than one path/query combo, we can do them with `$facet`
-    // aggregate state
-  } else if (args.OR) {
-    throw new Error('OR not implemented');
-  } else {
+  function buildIt(arg) {
     // An expression
-    const joinPathName = `${args.path}__matched`;
+    const joinPathName = `${arg.path}__matched`;
     pipeline.pipeline = (pipeline.pipeline || []).concat(
-      expressionPipeline(args, { joinPathName, model }),
+      expressionPipeline(arg, { joinPathName, model }),
     );
     pipeline.postAggregateMutation = (
       pipeline.postAggregateMutation || []
-    ).concat(postAggregateMutationFactory(args, { joinPathName, model }));
+    ).concat(postAggregateMutationFactory(arg, { joinPathName, model }));
+  }
+
+  // TODO
+  if (args.AND) {
+    // TODO: Recurse / nest
+    args.AND.forEach(buildIt);
+  } else if (args.OR) {
+    // If there are more than one path/query combo, we can do them with `$facet`
+    // aggregate state
+    throw new Error('OR not implemented');
+  } else {
+    // An expression
+    buildIt(args);
   }
 
   return pipeline;
@@ -205,8 +211,7 @@ function lookup(args) {
     // 
   }
   */
-  const pipeline1 = buildPipeline(args[0], { model: this });
-  const pipeline2 = buildPipeline(args[1], { model: this });
+  const pipeline = buildPipeline(args, { model: this });
 
   return this.aggregate([
     /* OR
@@ -234,28 +239,20 @@ function lookup(args) {
       }
     },
     */
-
-    ...pipeline1.pipeline,
-    ...pipeline2.pipeline,
+    ...pipeline.pipeline,
   ])
     .exec()
     .then(data =>
       data
-        .map((item, index, list) => {
+        .map((item, index, list) => (
           // Iterate over all the mutations
-          const mutated1 = pipeline1.postAggregateMutation.reduce(
+          pipeline.postAggregateMutation.reduce(
             // And pass through the result to the following mutator
             (mutatedItem, mutation) => mutation(mutatedItem, index, list),
             // Starting at the original item
             item,
-          );
-          return pipeline2.postAggregateMutation.reduce(
-            // And pass through the result to the following mutator
-            (mutatedItem, mutation) => mutation(mutatedItem, index, list),
-            // Starting at the original item
-            mutated1,
-          );
-        })
+          )
+        ))
         // If anything gets removed, we clear it out here
         .filter(Boolean),
     )
@@ -343,7 +340,15 @@ const Post = mongoose.model('Post', postSchema);
     await Post.create({
       title: 'Oh hi there...',
       author: users[2],
+      status: statuses[3],
       categories: [categories[2], categories[3]],
+    });
+
+    await Post.create({
+      title: 'Talkin bout Keystone',
+      author: users[0],
+      status: statuses[1],
+      categories: [categories[0], categories[2]],
     });
     /*
     await (async () => {
@@ -365,10 +370,11 @@ const Post = mongoose.model('Post', postSchema);
     })();
     */
     await (async () => {
-      const postAuthorNames = [/Jess/i];
+      const postAuthorNames = [/Je/i];
+      const postCategories = ['node'];
       const postStatuses = ['Published', 'Archived'];
       console.log(
-        `Lookup posts with Status ${postStatuses}, and Author ${postAuthorNames}`,
+        `Lookup posts with Status ${postStatuses}, and Author ${postAuthorNames}, and Categories ${postCategories}`,
       );
       // Implicit 'AND' query
       await Post.lookup([
@@ -379,6 +385,10 @@ const Post = mongoose.model('Post', postSchema);
         {
           path: 'author',
           query: { name: { $in: postAuthorNames } },
+        },
+        {
+          path: 'categories',
+          query: { name: { $in: postCategories } },
         },
       ]);
     })();
