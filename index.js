@@ -1,3 +1,4 @@
+const util = require('util');
 const {
   Schema,
   Types: { ObjectId }
@@ -28,7 +29,7 @@ const postSchema = new Schema(
 function getRelModel(model, path) {
 }
 
-postSchema.statics.lookup = function({ path, query }) {
+postSchema.statics.lookup = function({ path, query, modifiers = {} }) {
   let rel;
   const many = this.schema.path(path).$isMongooseArray;
   if (many) {
@@ -41,11 +42,26 @@ postSchema.statics.lookup = function({ path, query }) {
   // FIXME: Not working
   console.log('rel.collection.name', rel.collection.name);
 
+  if (modifiers.some) {
+    // $expr: { $in: ["$_id", `$$${path}`] }
+  } else if (modifiers.every) {
+    // ??
+    // 
+  }
+
+  // If there are more than one path/query combo, we can do them with `$facet`
+  // aggregate state
+
+  const joinPathName = `${path}__matched`;
   return this.aggregate([
     {
+      // JOIN
       $lookup: {
+        // the MongoDB name of the collection - this is potentially different
+        // from the Mongoose name due to pluralization, etc. This guarantees the
+        // correct name.
         from: rel.collection.name,
-        as: path,
+        as: joinPathName,
         let: { [path]: `$${path}` },
         pipeline: [
           {
@@ -57,13 +73,19 @@ postSchema.statics.lookup = function({ path, query }) {
         ]
       }
     },
-    {
-      $unwind: `$${path}`,
-    }
+    // Filter out empty array results (the $lookup will return a document with
+    // an empty array when no matches are found in the related field
+    // TODO: This implies a `some` filter. For an `every` filter, we would need
+    // to somehow check that the resulting size of `path` equals the original
+    // document's size. In the case of one-to-one, we'd have to check that the
+    // resulting size is exactly 1 (which is the same as `$ne: []`?)
+    { $match: { [joinPathName]: { $exists: true, $ne: [] } } },
   ])
     .exec()
     .then(data => {
-      console.log(...data);
+      console.log(util.inspect(data, { depth: null, colors: true }));
+      // Recreate Mongoose instances of the sub items every time to allow for
+      // further operations to be performed on those sub items via Mongoose.
       return data.map(item =>
         this({
           ...item,
@@ -76,8 +98,6 @@ postSchema.statics.lookup = function({ path, query }) {
 const User = mongoose.model("User", userSchema);
 const Category = mongoose.model("Category", categorySchema);
 const Post = mongoose.model("Post", postSchema);
-
-const log = body => console.log(JSON.stringify(body, undefined, 2));
 
 (async function() {
   try {
@@ -126,16 +146,14 @@ const log = body => console.log(JSON.stringify(body, undefined, 2));
       query: { "name": { $in: postAuthorNames } }
     });
     console.log(`Lookup posts with Author ${postAuthorNames}`);
-    log(result);
 
     // Query with our static
-    const postCategoryNames = ['React', 'frontend'];
+    const postCategoryNames = ['React', 'GraphQL'];
     result = await Post.lookup({
       path: "categories",
       query: { "name": { $in: postCategoryNames } }
     });
     console.log(`Lookup posts with Categories ${postCategoryNames}`);
-    log(result);
 
     await mongoose.disconnect();
   } catch (e) {
