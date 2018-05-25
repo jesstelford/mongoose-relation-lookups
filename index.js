@@ -4,28 +4,6 @@ const {
   Types: { ObjectId }
 } = (mongoose = require("mongoose"));
 
-const uri = "mongodb://localhost/looktest";
-
-mongoose.Promise = global.Promise;
-mongoose.set("debug", true);
-
-const userSchema = new Schema({
-  name: String
-});
-
-const categorySchema = new Schema({
-  name: String
-});
-
-const postSchema = new Schema(
-  {
-    title: String,
-    author: { type: Schema.Types.ObjectId, ref: "User" },
-    categories: [{ type: Schema.Types.ObjectId, ref: "Category" }],
-  },
-  { timestamps: true }
-);
-
 // Non-recursive, should be called on every level
 function makeANDexplicit(args) {
   if (Array.isArray(args)) {
@@ -141,7 +119,42 @@ function postAggregateMutationFactory({ path }, { model, joinPathName }) {
   };
 }
 
-postSchema.statics.lookup = function(args) {
+/**
+ * @param args {Object} Recursive format: <EXPRESSION | AND>
+ * Where:
+ *
+ * <EXPRESSION>:
+ * <AND | OR | { path, query }>
+ * 
+ * <OR>:
+ * {
+ *   OR: [
+ *     <AND | OR | EXPRESSION>,
+ *     <AND | OR | EXPRESSION>,
+ *     ...
+ *   ]
+ * }
+ * 
+ * <AND>:
+ * <IMPLICIT_AND | EXPLICIT_AND>
+ * 
+ * <IMPLICIT_AND>:
+ * [
+ *   <AND | OR | EXPRESSION>,
+ *   <AND | OR | EXPRESSION>,
+ *   ...
+ * ]
+ * 
+ * <EXPLICIT_AND>:
+ * {
+ *   AND: [
+ *     <AND | OR | EXPRESSION>,
+ *     <AND | OR | EXPRESSION>,
+ *     ...
+ *   ]
+ * }
+*/
+function lookup(args) {
 
   /*
   if (modifiers.some) {
@@ -177,16 +190,55 @@ postSchema.statics.lookup = function(args) {
   ])
     .exec()
     .then(data => (
-      data.map(postAggregateMutation)
+      data
+        .map(postAggregateMutation)
+        .filter(Boolean)
     )).then(data => {
       console.log(util.inspect(data, { depth: null, colors: true }));
       return data;
     });
 };
 
+
+
+
+
+const uri = "mongodb://localhost/looktest";
+
+mongoose.Promise = global.Promise;
+mongoose.set("debug", true);
+
+const userSchema = new Schema({
+  name: String
+});
+
+const statusSchema = new Schema({
+  status: String
+});
+
+const categorySchema = new Schema({
+  name: String
+});
+
+const postSchema = new Schema(
+  {
+    title: String,
+    author: { type: Schema.Types.ObjectId, ref: "User" },
+    status: { type: Schema.Types.ObjectId, ref: "Status" },
+    categories: [{ type: Schema.Types.ObjectId, ref: "Category" }],
+  },
+  { timestamps: true }
+);
+
+postSchema.statics.lookup = lookup;
+
 const User = mongoose.model("User", userSchema);
+const Status = mongoose.model("Status", statusSchema);
 const Category = mongoose.model("Category", categorySchema);
 const Post = mongoose.model("Post", postSchema);
+
+
+
 
 (async function() {
   try {
@@ -197,33 +249,40 @@ const Post = mongoose.model("Post", postSchema);
 
     // Create items
     const users = await User.insertMany(
-      ["Jed Watson", "Jess Telford", "Boris Bozic"].map(name => ({ name }))
+      ['Jed Watson', 'Jess Telford', 'Boris Bozic'].map(name => ({ name }))
+    );
+
+    const statuses = await Status.insertMany(
+      ['Deleted', 'Draft', 'Published', 'Archived'].map(name => ({ name }))
     );
 
     const categories = await Category.insertMany(
-      ["React", "GraphQL", "node", "frontend"].map(name => ({ name }))
+      ['React', 'GraphQL', 'node', 'frontend'].map(name => ({ name }))
     );
 
     await Post.create({
-      title: "Something",
-      author: users[0],
+      title: 'Something',
+      author: users[1],
+      statuses: statuses[0],
       categories: [categories[0]],
     });
 
     await Post.create({
-      title: "An Article",
-      author: users[0],
+      title: 'An Article',
+      author: users[1],
+      statuses: statuses[2],
       categories: [categories[0], categories[1]],
     });
 
     await Post.create({
-      title: "And another thing!",
+      title: 'And another thing!',
       author: users[1],
+      statuses: statuses[3],
       categories: [categories[1], categories[2]],
     });
 
     await Post.create({
-      title: "Oh hi there...",
+      title: 'Oh hi there...',
       author: users[2],
       categories: [categories[2], categories[3]],
     });
@@ -232,8 +291,8 @@ const Post = mongoose.model("Post", postSchema);
       const postAuthorNames = [/Jess/i];
       console.log(`Lookup posts with Author ${postAuthorNames}`);
       await Post.lookup({
-        path: "author",
-        query: { "name": { $in: postAuthorNames } }
+        path: 'author',
+        query: { 'name': { $in: postAuthorNames } }
       });
     })();
 
@@ -241,23 +300,24 @@ const Post = mongoose.model("Post", postSchema);
       const postCategoryNames = ['React', 'GraphQL'];
       console.log(`Lookup posts with Categories ${postCategoryNames}`);
       await Post.lookup({
-        path: "categories",
-        query: { "name": { $in: postCategoryNames } }
+        path: 'categories',
+        query: { 'name': { $in: postCategoryNames } }
       });
     })();
 
     await (async () => {
       const postAuthorNames = [/Jess/i];
-      const postCategoryNames = ['React', 'GraphQL'];
-      console.log(`Lookup posts with Categories ${postCategoryNames}, and Author ${postAuthorNames}`);
+      const postStatuses = ['published', 'archived'];
+      console.log(`Lookup posts with Status ${postStatuses}, and Author ${postAuthorNames}`);
+      // Implicit 'AND' query
       await Post.lookup([
         {
-          path: "categories",
-          query: { "name": { $in: postCategoryNames } }
+          path: 'status',
+          query: { 'status': { $in: postStatuses } }
         },
         {
-          path: "author",
-          query: { "name": { $in: postAuthorNames } }
+          path: 'author',
+          query: { 'name': { $in: postAuthorNames } }
         }
       ]);
     })();
